@@ -3,21 +3,32 @@ package main
 import "core:math"
 import "core:math/linalg"
 
-Hittable :: union {
+Object :: union {
 	Sphere,
 }
 
+Hittable :: struct {
+	obj: Object,
+	mat: ^Material,
+}
+
 Hit_Record :: struct {
-	t:          f32, // t value for collision
-	point:      Vec3, // point where the collision happens
-	normal:     Vec3, // normal vector for collision on object
-	front_face: bool, // whether the hit was on the object's front face
+	// t value for collision
+	t:          f32,
+	// point where the collision happens
+	point:      Vec3,
+	// normal vector for collision on object
+	normal:     Vec3,
+	// whether the hit was on the object's front face
+	front_face: bool,
+	// the material of the surface hit
+	mat:        Material,
 }
 
 ray_hit :: proc(ray: Ray, interval: Interval, hittable: Hittable) -> Maybe(Hit_Record) {
-	switch obj in hittable {
+	switch obj in hittable.obj {
 	case Sphere:
-		return ray_sphere_hit(ray, interval, obj)
+		return ray_sphere_hit(ray, interval, obj, hittable.mat^)
 	case:
 		return nil
 	}
@@ -41,7 +52,12 @@ Sphere :: struct {
 	radius: f32,
 }
 
-ray_sphere_hit :: proc(ray: Ray, interval: Interval, sphere: Sphere) -> Maybe(Hit_Record) {
+ray_sphere_hit :: proc(
+	ray: Ray,
+	interval: Interval,
+	sphere: Sphere,
+	mat: Material,
+) -> Maybe(Hit_Record) {
 	oc := sphere.center - ray.origin
 	a := math.pow(linalg.length(ray.direction), 2)
 	h := linalg.dot(ray.direction, oc)
@@ -59,6 +75,7 @@ ray_sphere_hit :: proc(ray: Ray, interval: Interval, sphere: Sphere) -> Maybe(Hi
 	rec: Hit_Record
 	rec.t = root
 	rec.point = ray_at(ray, rec.t)
+	rec.mat = mat
 
 	outward_normal := (rec.point - sphere.center) / sphere.radius
 	rec.front_face = linalg.dot(ray.direction, outward_normal) < 0

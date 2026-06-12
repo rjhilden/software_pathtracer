@@ -29,9 +29,26 @@ main :: proc() {
 	world := make([dynamic]Hittable)
 	defer delete(world)
 
-	append(&world, Hittable(Sphere{Vec3{0, 0, -1}, 0.5}))
-	append(&world, Hittable(Sphere{Vec3{0.2, -0.1, -0.5}, 0.10}))
-	append(&world, Hittable(Sphere{Vec3{0, -100.5, -1}, 100}))
+	// append(
+	// 	&world,
+	// 	Hittable{Material{.Lambertian, Color{0.5, 0.5, 0.5}}, Sphere{Vec3{0, 0, -1}, 0.5}},
+	// )
+	// append(
+	// 	&world,
+	// 	Hittable{Material{.Lambertian, Color{0.5, 0.5, 0.5}}, Sphere{Vec3{0, -100.5, -1}, 100}},
+	// )
+	ground_mat := Material{.Lambertian, Color{0.8, 0.8, 0}}
+	center_mat := Material{.Lambertian, Color{0.1, 0.2, 0.5}}
+	left_mat := Material{.Metal, Color{0.8, 0.8, 0.8}}
+	right_mat := Material{.Metal, Color{0.8, 0.6, 0.2}}
+
+	append_elems(
+		&world,
+		Hittable{Sphere{Vec3{0, -100.5, -1}, 100}, &ground_mat},
+		Hittable{Sphere{Vec3{0, 0, -2}, 0.5}, &center_mat},
+		Hittable{Sphere{Vec3{-1, 0, -1}, 0.5}, &left_mat},
+		Hittable{Sphere{Vec3{1, 0, -1}, 0.5}, &right_mat},
+	)
 
 	cam := default_camera
 
