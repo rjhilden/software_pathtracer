@@ -23,6 +23,19 @@ ray_hit :: proc(ray: Ray, interval: Interval, hittable: Hittable) -> Maybe(Hit_R
 	}
 }
 
+ray_hit_any :: proc(ray: Ray, interval: Interval, world: []Hittable) -> Maybe(Hit_Record) {
+	maybe_hit: Maybe(Hit_Record)
+	closest_so_far := interval.max
+	for obj in world {
+		if hit, did_hit := ray_hit(ray, Interval{interval.min, closest_so_far}, obj).?; did_hit {
+			closest_so_far = hit.t
+			maybe_hit = hit
+		}
+	}
+
+	return maybe_hit
+}
+
 Sphere :: struct {
 	center: Vec3,
 	radius: f32,
