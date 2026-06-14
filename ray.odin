@@ -12,6 +12,18 @@ vec3_reflect :: proc(vec, normal: Vec3) -> Vec3 {
 }
 
 @(require_results)
+vec3_refract :: proc(vec, normal: Vec3, refract_ratio: f32) -> Vec3 {
+	cos_theta := math.min(1.0, linalg.dot(-vec, normal))
+	refracted_perp := refract_ratio * (vec + cos_theta * normal)
+	refracted_parallel := -math.sqrt(math.abs(1.0 - vec3_length_squared(refracted_perp))) * normal
+	return refracted_perp + refracted_parallel
+}
+
+vec3_length_squared :: proc(vec: Vec3) -> f32 {
+	return linalg.dot(vec, vec)
+}
+
+@(require_results)
 vec3_near_zero :: proc(vec: Vec3) -> bool {
 	s :: 1e-8
 	return math.abs(vec.x) < s && math.abs(vec.y) < s && math.abs(vec.z) < s
@@ -34,17 +46,17 @@ vec3_random_range :: proc(min, max: f32) -> Vec3 {
 @(require_results)
 vec3_random_unit :: proc() -> Vec3 {
 	for true {
-		v := vec3_random_range(-1, 1)
-		len_sq := linalg.dot(v, v)
-		if 1e-30 < len_sq && len_sq <= 1 do return linalg.normalize(v)
+		vec := vec3_random_range(-1, 1)
+		len_sq := vec3_length_squared(vec)
+		if 1e-30 < len_sq && len_sq <= 1 do return linalg.normalize(vec)
 	}
 	unreachable()
 }
 
 @(require_results)
 vec3_random_unit_on_hemisphere :: proc(normal: Vec3) -> Vec3 {
-	v := vec3_random_unit()
-	return v if linalg.dot(v, normal) > 0.0 else -v
+	vec := vec3_random_unit()
+	return vec if linalg.dot(vec, normal) > 0.0 else -vec
 }
 
 Color :: distinct Vec3
