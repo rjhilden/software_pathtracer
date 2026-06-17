@@ -6,21 +6,27 @@ import "core:math/rand"
 
 Vec3 :: distinct [3]f32
 
+dot :: linalg.dot
+cross :: linalg.cross
+length :: linalg.length
+normalize :: linalg.normalize
+
 @(require_results)
 vec3_reflect :: proc(vec, normal: Vec3) -> Vec3 {
-	return vec - 2 * linalg.dot(vec, normal) * normal
+	return vec - 2 * dot(vec, normal) * normal
 }
 
 @(require_results)
 vec3_refract :: proc(vec, normal: Vec3, refract_ratio: f32) -> Vec3 {
-	cos_theta := math.min(1.0, linalg.dot(-vec, normal))
+	cos_theta := math.min(1.0, dot(-vec, normal))
 	refracted_perp := refract_ratio * (vec + cos_theta * normal)
 	refracted_parallel := -math.sqrt(math.abs(1.0 - vec3_length_squared(refracted_perp))) * normal
 	return refracted_perp + refracted_parallel
 }
 
+@(require_results)
 vec3_length_squared :: proc(vec: Vec3) -> f32 {
-	return linalg.dot(vec, vec)
+	return dot(vec, vec)
 }
 
 @(require_results)
@@ -48,7 +54,7 @@ vec3_random_unit :: proc() -> Vec3 {
 	for true {
 		vec := vec3_random_range(-1, 1)
 		len_sq := vec3_length_squared(vec)
-		if 1e-30 < len_sq && len_sq <= 1 do return linalg.normalize(vec)
+		if 1e-30 < len_sq && len_sq <= 1 do return normalize(vec)
 	}
 	unreachable()
 }
@@ -56,7 +62,7 @@ vec3_random_unit :: proc() -> Vec3 {
 @(require_results)
 vec3_random_unit_on_hemisphere :: proc(normal: Vec3) -> Vec3 {
 	vec := vec3_random_unit()
-	return vec if linalg.dot(vec, normal) > 0.0 else -vec
+	return vec if dot(vec, normal) > 0.0 else -vec
 }
 
 Color :: distinct Vec3
@@ -79,7 +85,7 @@ color_linear_to_gamma :: proc(color: Color) -> Color {
 // Converts linear color to gamma-space, clamps it to [0, 1), then scales it to [0, 255].
 @(require_results)
 color_to_bytes :: proc(color: Color) -> [3]byte {
-	return cast([3]byte)(linalg.clamp(color_linear_to_gamma(color), Color{}, Color{} + 1) * 255)
+	return cast([3]byte)(linalg.clamp(color_linear_to_gamma(color), Color{}, Color{1, 1, 1}) * 255)
 }
 
 Ray :: struct {

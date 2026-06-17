@@ -1,7 +1,7 @@
 package main
 
 import "core:fmt"
-import "core:math/linalg"
+import "core:math"
 import "core:math/rand"
 import "core:mem"
 import "core:strings"
@@ -12,32 +12,80 @@ Camera :: struct {
 	image_height:      int,
 	focal_length:      f32,
 	center:            Vec3,
-	viewport_height:   f32,
+	target:            Vec3,
+	up:                Vec3,
+	vertical_fov:      f32,
 	viewport_width:    f32,
+	viewport_height:   f32,
 	viewport_u:        Vec3,
 	viewport_v:        Vec3,
 	samples_per_pixel: int,
 	max_bounces:       int,
+	first_pixel_loc:   Vec3,
 	pixel_du:          Vec3,
 	pixel_dv:          Vec3,
 }
 
-default_camera :: Camera {
-	default_aspect_ratio,
-	default_image_width,
-	default_image_height,
-	default_focal_length,
-	default_camera_center,
-	default_viewport_height,
-	default_viewport_width,
-	default_viewport_u,
-	default_viewport_v,
-	default_samples_per_pixel,
-	default_max_bounces,
-	default_pixel_du,
-	default_pixel_dv,
+@(require_results)
+camera_init :: proc(
+	aspect_ratio: f32 = DEFAULT_ASPECT_RATIO,
+	image_width: int = DEFAULT_IMAGE_WIDTH,
+	center: Vec3 = DEFAULT_CAMERA_CENTER,
+	target: Vec3 = DEFAULT_CAMERA_TARGET,
+	up: Vec3 = DEFAULT_CAMERA_UP,
+	vertical_fov: f32 = DEFAULT_VERTICAL_FOV,
+	samples_per_pixel: int = DEFAULT_SAMPLES_PER_PIXEL,
+	max_bounces: int = DEFAULT_MAX_BOUNCES,
+) -> Camera {
+	image_height := max(1, int(f32(image_width) / aspect_ratio))
+
+	focal_length := length(center - target)
+	theta := degrees_to_radians(vertical_fov)
+	h := math.tan(theta / 2)
+
+	viewport_height := 2 * h * focal_length
+	viewport_width := viewport_height * (f32(image_width) / f32(image_height))
+
+	w := normalize(center - target)
+	u := normalize(cross(up, w))
+	v := cross(w, u)
+
+	viewport_u := viewport_width * u
+	viewport_v := viewport_height * -v
+
+	pixel_du := viewport_u / f32(image_width)
+	pixel_dv := viewport_v / f32(image_height)
+
+	viewport_upper_left := center - (focal_length * w) - (viewport_u + viewport_v) / 2
+	first_pixel_loc := viewport_upper_left + (pixel_du + pixel_dv) / 2
+
+	return Camera {
+		aspect_ratio,
+		image_width,
+		image_height,
+		focal_length,
+		center,
+		target,
+		up,
+		vertical_fov,
+		viewport_width,
+		viewport_height,
+		viewport_u,
+		viewport_v,
+		samples_per_pixel,
+		max_bounces,
+		first_pixel_loc,
+		pixel_du,
+		pixel_dv,
+	}
 }
 
+@(require_results)
+degrees_to_radians :: proc(deg: f32) -> f32 {
+	return deg * math.PI / 180
+}
+
+@(require_results)
 ray_color :: proc(ray: Ray, world: []Hittable, depth: int) -> Color {
 	if depth <= 0 do return Color{0, 0, 0}
 
@@ -45,22 +93,19 @@ ray_color :: proc(ray: Ray, world: []Hittable, depth: int) -> Color {
 		if scattered, attenuation, did_scatter := scatter(ray, hit, hit.mat); did_scatter {
 			return attenuation * ray_color(scattered, world, depth - 1)
 		} else {
-			// this should be reached very rarely
+			// this should only be possible to reachin weird floating point edge cases i think?
 			return Color{0, 0, 0}
 		}
 	}
 
 	// background 'sky'
-	dir := linalg.normalize(ray.direction)
+	dir := normalize(ray.direction)
 	a := (dir.y + 1.0) / 2.0
 	return lerp(Color{1, 1, 1}, Color{0.5, 0.7, 1}, a)
 }
 
+@(require_results)
 render :: proc(cam: Camera, world: []Hittable) -> [dynamic]byte {
-	viewport_upper_left :=
-		cam.center - Vec3{0, 0, cam.focal_length} - (cam.viewport_u + cam.viewport_v) / 2
-	first_pixel_loc := viewport_upper_left + (cam.pixel_du + cam.pixel_dv) / 2
-
 	img := make([dynamic]byte)
 	reserve(&img, cam.image_width * cam.image_height * 3)
 
@@ -72,7 +117,7 @@ render :: proc(cam: Camera, world: []Hittable) -> [dynamic]byte {
 			for _ in 0 ..< cam.samples_per_pixel {
 				offset := [2]f32{rand.float32(), rand.float32()} / 2.0
 				pixel_sample :=
-					first_pixel_loc +
+					cam.first_pixel_loc +
 					(f32(i) * cam.pixel_du + (cam.pixel_du * offset.x)) +
 					(f32(j) * cam.pixel_dv + (cam.pixel_dv * offset.y))
 
@@ -81,8 +126,7 @@ render :: proc(cam: Camera, world: []Hittable) -> [dynamic]byte {
 					direction = pixel_sample - cam.center,
 				}
 
-				pixel_color +=
-					ray_color(ray, world[:], cam.max_bounces) / f32(cam.samples_per_pixel)
+				pixel_color += ray_color(ray, world, cam.max_bounces) / f32(cam.samples_per_pixel)
 			}
 
 			bytes := color_to_bytes(pixel_color)
@@ -106,35 +150,22 @@ render :: proc(cam: Camera, world: []Hittable) -> [dynamic]byte {
 }
 
 @(private = "file")
-default_aspect_ratio :: 16.0 / 9.0
+DEFAULT_ASPECT_RATIO :: 16.0 / 9.0
 
 @(private = "file")
-default_image_width :: 400
-@(private = "file")
-default_image_height :: default_image_width / default_aspect_ratio
+DEFAULT_IMAGE_WIDTH :: 400
 
 @(private = "file")
-default_focal_length :: 1
+DEFAULT_CAMERA_CENTER :: Vec3{0, 0, 0}
 @(private = "file")
-default_camera_center :: Vec3{0, 0, 0}
+DEFAULT_CAMERA_TARGET :: Vec3{0, 0, -1}
+@(private = "file")
+DEFAULT_CAMERA_UP :: Vec3{0, 1, 0}
 
 @(private = "file")
-default_viewport_height :: 2
-@(private = "file")
-default_viewport_width ::
-	default_viewport_height * (f32(default_image_width) / f32(default_image_height))
+DEFAULT_VERTICAL_FOV :: 90
 
 @(private = "file")
-default_viewport_u :: Vec3{default_viewport_width, 0, 0}
+DEFAULT_SAMPLES_PER_PIXEL :: 100
 @(private = "file")
-default_viewport_v :: Vec3{0, -default_viewport_height, 0}
-
-@(private = "file")
-default_samples_per_pixel :: 100
-@(private = "file")
-default_max_bounces :: 50
-
-@(private = "file")
-default_pixel_du :: Vec3{default_viewport_width / default_image_width, 0, 0}
-@(private = "file")
-default_pixel_dv :: Vec3{0, -default_viewport_height / default_image_height, 0}
+DEFAULT_MAX_BOUNCES :: 50

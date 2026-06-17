@@ -1,7 +1,6 @@
 package main
 
 import "core:math"
-import "core:math/linalg"
 import "core:math/rand"
 
 Lambertian :: struct {
@@ -71,7 +70,7 @@ scatter_metal :: proc(
 	hit: bool = false,
 ) {
 	reflected :=
-		linalg.normalize(vec3_reflect(ray.direction, rec.normal)) + (mat.fuzz * vec3_random_unit())
+		normalize(vec3_reflect(ray.direction, rec.normal)) + (mat.fuzz * vec3_random_unit())
 
 	scattered = Ray{rec.point, reflected}
 	attenuation = mat.albedo
@@ -90,8 +89,8 @@ scatter_dielectric :: proc(
 ) {
 	refract_ratio := 1.0 / mat.refractive_index if rec.front_face else mat.refractive_index
 
-	unit_direction := linalg.normalize(ray.direction)
-	cos_theta := math.min(1.0, linalg.dot(-unit_direction, rec.normal))
+	unit_direction := normalize(ray.direction)
+	cos_theta := math.min(1.0, dot(-unit_direction, rec.normal))
 	sin_theta := math.sqrt(1.0 - cos_theta * cos_theta)
 
 	direction := Vec3{}

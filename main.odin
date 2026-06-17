@@ -2,6 +2,7 @@ package main
 
 import "core:c"
 import "core:fmt"
+import "core:math"
 import "core:mem"
 import "core:os"
 import "core:strings"
@@ -44,7 +45,7 @@ main :: proc() {
 		Hittable{Sphere{Vec3{1, 0, -1}, 0.5}, &right_mat},
 	)
 
-	cam := default_camera
+	cam := camera_init(center = Vec3{-2, 2, 1})
 
 	img := render(cam, world[:])
 	defer delete(img)

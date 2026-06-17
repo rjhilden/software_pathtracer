@@ -1,7 +1,6 @@
 package main
 
 import "core:math"
-import "core:math/linalg"
 
 Object :: union {
 	Sphere,
@@ -59,9 +58,9 @@ ray_sphere_hit :: proc(
 	mat: Material,
 ) -> Maybe(Hit_Record) {
 	oc := sphere.center - ray.origin
-	a := math.pow(linalg.length(ray.direction), 2)
-	h := linalg.dot(ray.direction, oc)
-	c := math.pow(linalg.length(oc), 2) - sphere.radius * sphere.radius
+	a := math.pow(length(ray.direction), 2)
+	h := dot(ray.direction, oc)
+	c := math.pow(length(oc), 2) - sphere.radius * sphere.radius
 
 	discriminant := h * h - a * c
 	if discriminant < 0 do return nil
@@ -78,7 +77,7 @@ ray_sphere_hit :: proc(
 	rec.mat = mat
 
 	outward_normal := (rec.point - sphere.center) / sphere.radius
-	rec.front_face = linalg.dot(ray.direction, outward_normal) < 0
+	rec.front_face = dot(ray.direction, outward_normal) < 0
 	rec.normal = outward_normal if rec.front_face else -outward_normal
 
 	return rec
