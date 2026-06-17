@@ -3,6 +3,7 @@ package main
 import "core:c"
 import "core:fmt"
 import "core:math"
+import "core:math/rand"
 import "core:mem"
 import "core:os"
 import "core:strings"
@@ -30,32 +31,60 @@ main :: proc() {
 	world := make([dynamic]Hittable)
 	defer delete(world)
 
-	ground_mat := Material(Lambertian{Color{0.8, 0.8, 0}})
-	center_mat := Material(Lambertian{Color{0.1, 0.2, 0.5}})
-	left_mat := Material(Dielectric{1.5})
-	bubble_mat := Material(Dielectric{1 / 1.5})
-	right_mat := Material(Metal{Color{0.8, 0.6, 0.2}, 1})
+	ground_mat := Material(Lambertian{Color{} + 0.5})
+	append(&world, Hittable{Object(Sphere{Vec3{0, -1000, 0}, 1000}), &ground_mat})
 
-	append_elems(
-		&world,
-		Hittable{Sphere{Vec3{0, -100.5, -1}, 100}, &ground_mat},
-		Hittable{Sphere{Vec3{0, 0, -1.2}, 0.5}, &center_mat},
-		Hittable{Sphere{Vec3{-1, 0, -1}, 0.5}, &left_mat},
-		Hittable{Sphere{Vec3{-1, 0, -1}, 0.4}, &bubble_mat},
-		Hittable{Sphere{Vec3{1, 0, -1}, 0.5}, &right_mat},
+	mats := make([dynamic]Material)
+	defer delete(mats)
+
+	for a := -11; a < 11; a += 1 {
+		for b := -11; b < 11; b += 1 {
+			choose_mat := rand.float32()
+			center := Vec3{f32(a) + 0.9 * rand.float32(), 0.2, f32(b) + 0.9 * rand.float32()}
+
+			if length(center - Vec3{4, 0.2, 0}) > 0.9 {
+				if choose_mat < 0.8 {
+					albedo := Color(vec3_random() * vec3_random())
+					append(&mats, Material(Lambertian{albedo}))
+				} else if choose_mat < 0.95 {
+					albedo := Color(vec3_random_range(0.5, 1))
+					fuzz := rand.float32_range(0, 0.5)
+					append(&mats, Material(Metal{albedo, fuzz}))
+				} else {
+					append(&mats, Material(Dielectric{1.5}))
+				}
+				append(&world, Hittable{Object(Sphere{center, 0.2}), &mats[len(mats) - 1]})
+			}
+		}
+	}
+
+	mat1 := Material(Dielectric{1.5})
+	append(&world, Hittable{Sphere{Vec3{0, 1, 0}, 1.0}, &mat1})
+
+	mat2 := Material(Lambertian{Color{0.4, 0.2, 0.1}})
+	append(&world, Hittable{Sphere{Vec3{-4, 1, 0}, 1.0}, &mat2})
+
+	mat3 := Material(Metal{Color{0.7, 0.6, 0.5}, 0.0})
+	append(&world, Hittable{Sphere{Vec3{4, 1, 0}, 1.0}, &mat3})
+
+	cam := camera_init(
+		image_width = 1200,
+		vertical_fov = 20,
+		center = Vec3{13, 2, 3},
+		target = Vec3{},
+		defocus_angle = 0.6,
+		focus_dist = 10,
 	)
-
-	cam := camera_init(center = Vec3{-2, 2, 1})
 
 	img := render(cam, world[:])
 	defer delete(img)
 
 	image.write_png(
-		out_filepath,
-		c.int(cam.image_width),
-		c.int(cam.image_height),
-		3,
-		raw_data(img),
-		c.int(cam.image_width * 3),
+		filename = out_filepath,
+		w = c.int(cam.image_width),
+		h = c.int(cam.image_height),
+		comp = 3,
+		data = raw_data(img),
+		stride_in_bytes = c.int(cam.image_width * 3),
 	)
 }

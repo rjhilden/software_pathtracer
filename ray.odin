@@ -60,6 +60,15 @@ vec3_random_unit :: proc() -> Vec3 {
 }
 
 @(require_results)
+vec3_random_in_unit_disk :: proc() -> Vec3 {
+	for true {
+		vec := Vec3{rand.float32_range(-1, 1), rand.float32_range(-1, 1), 0}
+		if vec3_length_squared(vec) < 1 do return vec
+	}
+	unreachable()
+}
+
+@(require_results)
 vec3_random_unit_on_hemisphere :: proc(normal: Vec3) -> Vec3 {
 	vec := vec3_random_unit()
 	return vec if dot(vec, normal) > 0.0 else -vec

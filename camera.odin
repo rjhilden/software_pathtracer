@@ -7,23 +7,18 @@ import "core:mem"
 import "core:strings"
 
 Camera :: struct {
-	aspect_ratio:      f32,
 	image_width:       int,
 	image_height:      int,
-	focal_length:      f32,
 	center:            Vec3,
 	target:            Vec3,
-	up:                Vec3,
-	vertical_fov:      f32,
-	viewport_width:    f32,
-	viewport_height:   f32,
-	viewport_u:        Vec3,
-	viewport_v:        Vec3,
 	samples_per_pixel: int,
 	max_bounces:       int,
 	first_pixel_loc:   Vec3,
 	pixel_du:          Vec3,
 	pixel_dv:          Vec3,
+	defocus_angle:     f32,
+	defocus_disk_u:    Vec3,
+	defocus_disk_v:    Vec3,
 }
 
 @(require_results)
@@ -36,14 +31,15 @@ camera_init :: proc(
 	vertical_fov: f32 = DEFAULT_VERTICAL_FOV,
 	samples_per_pixel: int = DEFAULT_SAMPLES_PER_PIXEL,
 	max_bounces: int = DEFAULT_MAX_BOUNCES,
+	defocus_angle: f32 = DEFAULT_DEFOCUS_ANGLE,
+	focus_dist: f32 = DEFAULT_FOCUS_DIST,
 ) -> Camera {
 	image_height := max(1, int(f32(image_width) / aspect_ratio))
 
-	focal_length := length(center - target)
 	theta := degrees_to_radians(vertical_fov)
 	h := math.tan(theta / 2)
 
-	viewport_height := 2 * h * focal_length
+	viewport_height := 2 * h * focus_dist
 	viewport_width := viewport_height * (f32(image_width) / f32(image_height))
 
 	w := normalize(center - target)
@@ -56,33 +52,52 @@ camera_init :: proc(
 	pixel_du := viewport_u / f32(image_width)
 	pixel_dv := viewport_v / f32(image_height)
 
-	viewport_upper_left := center - (focal_length * w) - (viewport_u + viewport_v) / 2
+	viewport_upper_left := center - (focus_dist * w) - (viewport_u + viewport_v) / 2
 	first_pixel_loc := viewport_upper_left + (pixel_du + pixel_dv) / 2
 
+	defocus_radius := focus_dist * math.tan(degrees_to_radians(defocus_angle / 2))
+	defocus_disk_u := defocus_radius * u
+	defocus_disk_v := defocus_radius * v
+
 	return Camera {
-		aspect_ratio,
 		image_width,
 		image_height,
-		focal_length,
 		center,
 		target,
-		up,
-		vertical_fov,
-		viewport_width,
-		viewport_height,
-		viewport_u,
-		viewport_v,
 		samples_per_pixel,
 		max_bounces,
 		first_pixel_loc,
 		pixel_du,
 		pixel_dv,
+		defocus_angle,
+		defocus_disk_u,
+		defocus_disk_v,
 	}
 }
 
 @(require_results)
 degrees_to_radians :: proc(deg: f32) -> f32 {
 	return deg * math.PI / 180
+}
+
+@(require_results)
+camera_get_ray :: proc(cam: Camera, i, j: int) -> Ray {
+	offset := [2]f32{rand.float32(), rand.float32()} - 0.5
+	pixel_sample :=
+		cam.first_pixel_loc +
+		((f32(i) + offset.x) * cam.pixel_du) +
+		((f32(j) + offset.y) * cam.pixel_dv)
+	// (f32(i) * cam.pixel_du + (cam.pixel_du * offset.x)) +
+	// (f32(j) * cam.pixel_dv + (cam.pixel_dv * offset.y))
+
+	ray_origin: Vec3
+	if cam.defocus_angle <= 0 do ray_origin = cam.center
+	else {
+		p := vec3_random_in_unit_disk()
+		ray_origin = cam.center + p.x * cam.defocus_disk_u + p.y * cam.defocus_disk_v
+	}
+
+	return Ray{ray_origin, pixel_sample - ray_origin}
 }
 
 @(require_results)
@@ -115,17 +130,18 @@ render :: proc(cam: Camera, world: []Hittable) -> [dynamic]byte {
 			pixel_color: Color
 
 			for _ in 0 ..< cam.samples_per_pixel {
-				offset := [2]f32{rand.float32(), rand.float32()} / 2.0
-				pixel_sample :=
-					cam.first_pixel_loc +
-					(f32(i) * cam.pixel_du + (cam.pixel_du * offset.x)) +
-					(f32(j) * cam.pixel_dv + (cam.pixel_dv * offset.y))
+				// offset := [2]f32{rand.float32(), rand.float32()} / 2.0
+				// pixel_sample :=
+				// 	cam.first_pixel_loc +
+				// 	(f32(i) * cam.pixel_du + (cam.pixel_du * offset.x)) +
+				// 	(f32(j) * cam.pixel_dv + (cam.pixel_dv * offset.y))
 
-				ray := Ray {
-					origin    = cam.center,
-					direction = pixel_sample - cam.center,
-				}
+				// ray := Ray {
+				// 	origin    = cam.center,
+				// 	direction = pixel_sample - cam.center,
+				// }
 
+				ray := camera_get_ray(cam, i, j)
 				pixel_color += ray_color(ray, world, cam.max_bounces) / f32(cam.samples_per_pixel)
 			}
 
@@ -169,3 +185,8 @@ DEFAULT_VERTICAL_FOV :: 90
 DEFAULT_SAMPLES_PER_PIXEL :: 100
 @(private = "file")
 DEFAULT_MAX_BOUNCES :: 50
+
+@(private = "file")
+DEFAULT_DEFOCUS_ANGLE :: 0
+@(private = "file")
+DEFAULT_FOCUS_DIST :: 10
