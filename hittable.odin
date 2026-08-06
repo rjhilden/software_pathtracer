@@ -1,7 +1,7 @@
 package main
 
-import "core:fmt"
 import "core:math"
+import "core:math/linalg"
 import "core:mem"
 import "core:os"
 import "core:slice"
@@ -97,10 +97,10 @@ ray_sphere_hit :: proc(
 }
 
 Mesh :: struct {
-	translation: Vec3,
-	verts:       []Vec3,
-	norms:       []Vec3,
-	faces:       []Face,
+	transformation: matrix[4, 4]f32,
+	verts:          []Vec3,
+	norms:          []Vec3,
+	faces:          []Face,
 }
 
 Face :: struct {
@@ -150,26 +150,33 @@ ray_mesh_hit :: proc(
 		// Möller–Trumbore intersection algorithm
 		// https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
 
-		v1 := mesh.verts[face.verts[0]] + mesh.translation
-		v2 := mesh.verts[face.verts[1]] + mesh.translation
-		v3 := mesh.verts[face.verts[2]] + mesh.translation
+		// TODO: need to figure out the transformation stuff
+		inverse_transformation := linalg.inverse(mesh.transformation)
+		local_ray := Ray {
+			vec3_transform(ray.origin, 1, inverse_transformation),
+			vec3_transform(ray.direction, 0, inverse_transformation),
+		}
+
+		v1 := mesh.verts[face.verts[0]]
+		v2 := mesh.verts[face.verts[1]]
+		v3 := mesh.verts[face.verts[2]]
 
 		e1 := v2 - v1
 		e2 := v3 - v1
 
-		ray_cross_e2 := cross(ray.direction, e2)
+		ray_cross_e2 := cross(local_ray.direction, e2)
 		det := dot(e1, ray_cross_e2)
 
 		if abs(det) < math.F32_EPSILON do return nil // ray is parallel to triangle
 
 		inv_det := 1.0 / det
-		s := ray.origin - v1
+		s := local_ray.origin - v1
 		u := inv_det * dot(s, ray_cross_e2)
 
 		if u < -math.F32_EPSILON || u - 1 > math.F32_EPSILON do return nil // ray passes outside e2's bounds
 
 		s_cross_e1 := cross(s, e1)
-		v := inv_det * dot(ray.direction, s_cross_e1)
+		v := inv_det * dot(local_ray.direction, s_cross_e1)
 
 		if v < -math.F32_EPSILON || u + v - 1 > math.F32_EPSILON do return nil // ray passes outside e1's bounds
 
@@ -180,12 +187,19 @@ ray_mesh_hit :: proc(
 		if !interval_surrounds(interval, t) do return nil // hit is outside interval
 
 		rec: Hit_Record
-		rec.t = t
 		rec.point = ray_at(ray, t)
+		rec.t = t
 		rec.mat = mat
 
-		normal := face_flat_normal(face, mesh.verts)
-		rec.front_face = dot(ray.direction, normal) < 0
+		normal := normalize(
+			vec3_transform(
+				face_flat_normal(face, mesh.verts),
+				0,
+				linalg.transpose(inverse_transformation),
+			),
+		)
+
+		rec.front_face = dot(local_ray.direction, normal) < 0
 		rec.normal = normal if rec.front_face else -normal
 
 		return rec
@@ -194,7 +208,7 @@ ray_mesh_hit :: proc(
 
 @(require_results)
 mesh_load_from_file :: proc(filepath: string) -> (mesh: Mesh, ok: bool = false) {
-	data, err := os.read_entire_file_from_path(filepath, context.temp_allocator)
+	data, err := os.read_entire_file_from_path(filepath, context.allocator)
 	if err != nil do return
 	defer delete(data)
 

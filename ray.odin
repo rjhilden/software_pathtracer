@@ -4,7 +4,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 
-Vec3 :: distinct [3]f32
+Vec3 :: [3]f32
 
 dot :: linalg.dot
 cross :: linalg.cross
@@ -72,6 +72,30 @@ vec3_random_in_unit_disk :: proc() -> Vec3 {
 vec3_random_unit_on_hemisphere :: proc(normal: Vec3) -> Vec3 {
 	vec := vec3_random_unit()
 	return vec if dot(vec, normal) > 0.0 else -vec
+}
+
+@(require_results)
+vec3_transform :: proc(v: Vec3, extension: f32, transformation: matrix[4, 4]f32) -> Vec3 {
+	v4 := [4]f32{v.x, v.y, v.z, extension}
+	t := transformation * v4
+	return t.xyz
+}
+
+@(require_results)
+transformation_matrix :: proc(
+	translation: Vec3 = Vec3{},
+	rotation_degrees: Vec3 = Vec3{},
+	scale: Vec3 = Vec3{1, 1, 1},
+) -> matrix[4, 4]f32 {
+	t := linalg.matrix4_translate(translation)
+
+	rx := linalg.matrix4_rotate(degrees_to_radians(rotation_degrees.x), Vec3{1, 0, 0})
+	ry := linalg.matrix4_rotate(degrees_to_radians(rotation_degrees.y), Vec3{0, 1, 0})
+	rz := linalg.matrix4_rotate(degrees_to_radians(rotation_degrees.z), Vec3{0, 0, 1})
+
+	s := linalg.matrix4_scale(scale)
+
+	return t * ry * rx * rz * s
 }
 
 Color :: distinct Vec3

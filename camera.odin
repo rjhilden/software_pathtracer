@@ -163,7 +163,7 @@ render :: proc(cam: Camera, world: []Hittable, background_color: Color) -> [dyna
 			&sb,
 			"(%d:%02d / %d:%02d est.)\r",
 			int(time.duration_minutes(elapsed)),
-			int(time.duration_seconds(elapsed)),
+			int(time.duration_seconds(elapsed)) % 60,
 			int(est_remaining) / 60,
 			int(est_remaining) % 60,
 		)

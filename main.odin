@@ -30,11 +30,12 @@ main :: proc() {
 	cam := camera_init(
 		image_width = 400,
 		vertical_fov = 90,
-		center = Vec3{1, 2, 1},
+		center = Vec3{0, 1.5, 0},
 		target = Vec3{0, 0, -2},
+		samples_per_pixel = 200,
 	)
 
-	world, mats := mesh_test()
+	world, mats := teapot_test()
 	defer delete(world)
 	defer delete(mats)
 
@@ -52,8 +53,8 @@ main :: proc() {
 }
 
 mesh_test :: proc() -> ([dynamic]Hittable, [dynamic]Material) {
-	mats := make([dynamic]Material, 1)
-	world := make([dynamic]Hittable, 1)
+	mats := make([dynamic]Material, 3)
+	world := make([dynamic]Hittable, 3)
 
 	object := `
 	# Simple Square Pyramid OBJ File
@@ -74,15 +75,46 @@ mesh_test :: proc() -> ([dynamic]Hittable, [dynamic]Material) {
 	mesh, ok := mesh_load(string(object))
 	assert(ok)
 
-	mesh.translation = Vec3{-0.1, 0.1, -2}
+	mesh.transformation = transformation_matrix(
+		translation = Vec3{-0.1, 0.01, -2},
+		rotation_degrees = Vec3{0, -30, 0},
+		scale = Vec3{1, 1, 1},
+	)
 
 	// pyramid
-	// append(&mats, Material(Lambertian{Color{} + 0.1}))
 	append(&mats, Material(Metal{Color{0.4, 0.6, 0.5}, 0}))
 	append(&world, Hittable{Object(mesh), &mats[len(mats) - 1]})
 
 	// ground
 	append(&mats, Material(Lambertian{Color{} + 0.5}))
+	append(&world, Hittable{Object(Sphere{Vec3{0, -1000, 0}, 1000}), &mats[len(mats) - 1]})
+
+	// sun
+	append(&mats, Material(Diffuse_Light{Color{1, 1, 1}}))
+	append(&world, Hittable{Sphere{Vec3{1000, 200, 200}, 1000}, &mats[len(mats) - 1]})
+
+	return world, mats
+}
+
+teapot_test :: proc() -> ([dynamic]Hittable, [dynamic]Material) {
+	mats := make([dynamic]Material, 3)
+	world := make([dynamic]Hittable, 3)
+
+	mesh, ok := mesh_load_from_file("objs/utah_teapot_mediumpoly.obj")
+	assert(ok)
+
+	mesh.transformation = transformation_matrix(
+		translation = Vec3{-0.1, 0.01, -2},
+		rotation_degrees = Vec3{0, -15, 0},
+		scale = Vec3{} + 0.5,
+	)
+
+	// teapot
+	append(&mats, Material(Lambertian{Color{} + 1}))
+	append(&world, Hittable{Object(mesh), &mats[len(mats) - 1]})
+
+	// ground
+	append(&mats, Material(Lambertian{Color{0, 0.7, 0.2}}))
 	append(&world, Hittable{Object(Sphere{Vec3{0, -1000, 0}, 1000}), &mats[len(mats) - 1]})
 
 	// sun
