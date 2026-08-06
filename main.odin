@@ -2,7 +2,6 @@ package main
 
 import "core:c"
 import "core:fmt"
-import "core:math"
 import "core:math/rand"
 import "core:mem"
 import "core:os"
@@ -30,16 +29,16 @@ main :: proc() {
 
 	cam := camera_init(
 		image_width = 400,
-		vertical_fov = 20,
-		center = Vec3{13, 2, 3},
-		target = Vec3{},
+		vertical_fov = 90,
+		center = Vec3{1, 2, 1},
+		target = Vec3{0, 0, -2},
 	)
 
-	world, mats := many_spheres()
+	world, mats := mesh_test()
 	defer delete(world)
 	defer delete(mats)
 
-	img := render(cam, world[:], Color{0, 0.1, 0.4})
+	img := render(cam, world[:], Color{0, 0.2, 0.7})
 	defer delete(img)
 
 	image.write_png(
@@ -50,6 +49,47 @@ main :: proc() {
 		data = raw_data(img),
 		stride_in_bytes = c.int(cam.image_width * 3),
 	)
+}
+
+mesh_test :: proc() -> ([dynamic]Hittable, [dynamic]Material) {
+	mats := make([dynamic]Material, 1)
+	world := make([dynamic]Hittable, 1)
+
+	object := `
+	# Simple Square Pyramid OBJ File
+
+	v -1.0 0.0 -1.0
+	v  1.0 0.0 -1.0
+	v  1.0 0.0  1.0
+	v -1.0 0.0  1.0
+	v  0.0 1.5  0.0
+
+	f 1 3 4
+	f 1 2 3
+	f 1 5 2
+	f 2 5 3
+	f 3 5 4
+	f 4 5 1
+	`
+	mesh, ok := mesh_load(string(object))
+	assert(ok)
+
+	mesh.translation = Vec3{-0.1, 0.1, -2}
+
+	// pyramid
+	// append(&mats, Material(Lambertian{Color{} + 0.1}))
+	append(&mats, Material(Metal{Color{0.4, 0.6, 0.5}, 0}))
+	append(&world, Hittable{Object(mesh), &mats[len(mats) - 1]})
+
+	// ground
+	append(&mats, Material(Lambertian{Color{} + 0.5}))
+	append(&world, Hittable{Object(Sphere{Vec3{0, -1000, 0}, 1000}), &mats[len(mats) - 1]})
+
+	// sun
+	append(&mats, Material(Diffuse_Light{Color{1, 1, 1}}))
+	append(&world, Hittable{Sphere{Vec3{1000, 200, 200}, 1000}, &mats[len(mats) - 1]})
+
+	return world, mats
 }
 
 many_spheres :: proc() -> ([dynamic]Hittable, [dynamic]Material) {

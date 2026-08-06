@@ -1,5 +1,6 @@
 package main
 
+import "core:fmt"
 import "core:math"
 import "core:mem"
 import "core:os"
@@ -32,6 +33,20 @@ Hit_Record :: struct {
 }
 
 @(require_results)
+ray_hit_any :: proc(ray: Ray, interval: Interval, world: []Hittable) -> Maybe(Hit_Record) {
+	maybe_hit: Maybe(Hit_Record)
+
+	closest_so_far := interval.max
+	for obj in world {
+		hit := ray_hit(ray, Interval{interval.min, closest_so_far}, obj).? or_continue
+		closest_so_far = hit.t
+		maybe_hit = hit
+	}
+
+	return maybe_hit
+}
+
+@(require_results)
 ray_hit :: proc(ray: Ray, interval: Interval, hittable: Hittable) -> Maybe(Hit_Record) {
 	switch obj in hittable.obj {
 	case Sphere:
@@ -41,21 +56,6 @@ ray_hit :: proc(ray: Ray, interval: Interval, hittable: Hittable) -> Maybe(Hit_R
 	case:
 		return nil
 	}
-}
-
-@(require_results)
-ray_hit_any :: proc(ray: Ray, interval: Interval, world: []Hittable) -> Maybe(Hit_Record) {
-	maybe_hit: Maybe(Hit_Record)
-
-	closest_so_far := interval.max
-	for obj in world {
-		if hit, did_hit := ray_hit(ray, Interval{interval.min, closest_so_far}, obj).?; did_hit {
-			closest_so_far = hit.t
-			maybe_hit = hit
-		}
-	}
-
-	return maybe_hit
 }
 
 Sphere :: struct {
@@ -86,7 +86,7 @@ ray_sphere_hit :: proc(
 
 	rec: Hit_Record
 	rec.t = root
-	rec.point = ray_at(ray, rec.t)
+	rec.point = ray_at(ray, root)
 	rec.mat = mat
 
 	outward_normal := (rec.point - sphere.center) / sphere.radius
@@ -97,14 +97,22 @@ ray_sphere_hit :: proc(
 }
 
 Mesh :: struct {
-	verts: []Vec3,
-	norms: []Vec3,
-	faces: []Face,
+	translation: Vec3,
+	verts:       []Vec3,
+	norms:       []Vec3,
+	faces:       []Face,
 }
 
 Face :: struct {
 	verts: [3]u32,
 	norms: [3]u32,
+}
+
+@(require_results)
+face_flat_normal :: proc(face: Face, vert_array: []Vec3) -> Vec3 {
+	e1 := vert_array[face.verts[1]] - vert_array[face.verts[0]]
+	e2 := vert_array[face.verts[2]] - vert_array[face.verts[0]]
+	return normalize(cross(e1, e2))
 }
 
 @(require_results)
@@ -114,7 +122,74 @@ ray_mesh_hit :: proc(
 	mesh: Mesh,
 	mat: ^Material,
 ) -> Maybe(Hit_Record) {
-	return nil
+	maybe_hit: Maybe(Hit_Record)
+
+	closest_so_far := interval.max
+	for face in mesh.faces {
+		hit := ray_triangle_hit(
+			ray,
+			Interval{interval.min, closest_so_far},
+			mesh,
+			mat,
+			face,
+		).? or_continue
+
+		closest_so_far = hit.t
+		maybe_hit = hit
+	}
+
+	return maybe_hit
+
+	ray_triangle_hit :: #force_inline proc(
+		ray: Ray,
+		interval: Interval,
+		mesh: Mesh,
+		mat: ^Material,
+		face: Face,
+	) -> Maybe(Hit_Record) {
+		// Möller–Trumbore intersection algorithm
+		// https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
+
+		v1 := mesh.verts[face.verts[0]] + mesh.translation
+		v2 := mesh.verts[face.verts[1]] + mesh.translation
+		v3 := mesh.verts[face.verts[2]] + mesh.translation
+
+		e1 := v2 - v1
+		e2 := v3 - v1
+
+		ray_cross_e2 := cross(ray.direction, e2)
+		det := dot(e1, ray_cross_e2)
+
+		if abs(det) < math.F32_EPSILON do return nil // ray is parallel to triangle
+
+		inv_det := 1.0 / det
+		s := ray.origin - v1
+		u := inv_det * dot(s, ray_cross_e2)
+
+		if u < -math.F32_EPSILON || u - 1 > math.F32_EPSILON do return nil // ray passes outside e2's bounds
+
+		s_cross_e1 := cross(s, e1)
+		v := inv_det * dot(ray.direction, s_cross_e1)
+
+		if v < -math.F32_EPSILON || u + v - 1 > math.F32_EPSILON do return nil // ray passes outside e1's bounds
+
+		// the ray intersects with the triangle, compute t to find where on the ray
+		t := inv_det * dot(e2, s_cross_e1)
+		if t <= math.F32_EPSILON do return nil // edge case, there was a line intersection but not a ray intersection
+
+		if !interval_surrounds(interval, t) do return nil // hit is outside interval
+
+		rec: Hit_Record
+		rec.t = t
+		rec.point = ray_at(ray, t)
+		rec.mat = mat
+
+		normal := face_flat_normal(face, mesh.verts)
+		rec.front_face = dot(ray.direction, normal) < 0
+		rec.normal = normal if rec.front_face else -normal
+
+		return rec
+	}
 }
 
 @(require_results)
@@ -161,7 +236,7 @@ mesh_load :: proc(data: string) -> (mesh: Mesh, ok: bool = false) {
 
 	return
 
-	parse_vertex :: proc(line: string) -> (vec: Vec3, ok: bool = false) {
+	parse_vertex :: #force_inline proc(line: string) -> (vec: Vec3, ok: bool = false) {
 		// x y z [w or 1.0]
 		line := line
 		x := strconv.parse_f32(strings.fields_iterator(&line) or_return) or_return
@@ -175,7 +250,7 @@ mesh_load :: proc(data: string) -> (mesh: Mesh, ok: bool = false) {
 		return
 	}
 
-	parse_normal :: proc(line: string) -> (vec: Vec3, ok: bool = false) {
+	parse_normal :: #force_inline proc(line: string) -> (vec: Vec3, ok: bool = false) {
 		// x y z
 		line := line
 		x := strconv.parse_f32(strings.fields_iterator(&line) or_return) or_return
@@ -188,7 +263,7 @@ mesh_load :: proc(data: string) -> (mesh: Mesh, ok: bool = false) {
 		return
 	}
 
-	parse_face :: proc(line: string) -> (face: Face, ok: bool = false) {
+	parse_face :: #force_inline proc(line: string) -> (face: Face, ok: bool = false) {
 		// 3 elems each made of 3 indices: vertex / texture / normal
 		line := line
 		e1 := strings.fields_iterator(&line) or_return
@@ -206,9 +281,10 @@ mesh_load :: proc(data: string) -> (mesh: Mesh, ok: bool = false) {
 			norm, has_norm := strings.split_iterator(&e, "/")
 			if len(e) > 0 do return
 
-			verts[i] = u32(strconv.parse_uint(vert, 10) or_return)
-			// if len(text) > 0 do return // we do not support textures yet
-			if has_norm do norms[i] = u32(strconv.parse_uint(norm, 10) or_return)
+			// indices are 1-based so subtract 1
+			verts[i] = u32(strconv.parse_uint(vert, 10) or_return) - 1
+			// if has_text do stuff // we do not support textures yet
+			if has_norm do norms[i] = u32(strconv.parse_uint(norm, 10) or_return) - 1
 		}
 
 		ok = true
