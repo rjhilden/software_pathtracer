@@ -5,6 +5,7 @@ import "core:math"
 import "core:math/rand"
 import "core:mem"
 import "core:strings"
+import "core:time"
 
 Camera :: struct {
 	image_width:       int,
@@ -87,8 +88,6 @@ camera_get_ray :: proc(cam: Camera, i, j: int) -> Ray {
 		cam.first_pixel_loc +
 		((f32(i) + offset.x) * cam.pixel_du) +
 		((f32(j) + offset.y) * cam.pixel_dv)
-	// (f32(i) * cam.pixel_du + (cam.pixel_du * offset.x)) +
-	// (f32(j) * cam.pixel_dv + (cam.pixel_dv * offset.y))
 
 	ray_origin: Vec3
 	if cam.defocus_angle <= 0 do ray_origin = cam.center
@@ -101,48 +100,41 @@ camera_get_ray :: proc(cam: Camera, i, j: int) -> Ray {
 }
 
 @(require_results)
-ray_color :: proc(ray: Ray, world: []Hittable, depth: int) -> Color {
-	if depth <= 0 do return Color{0, 0, 0}
+ray_color :: proc(ray: Ray, world: []Hittable, depth: int, background_color: Color) -> Color {
+	if depth <= 0 do return Color{}
 
-	if hit, did_hit := ray_hit_any(ray, Interval{0.001, pos_infinity}, world).?; did_hit {
-		if scattered, attenuation, did_scatter := scatter(ray, hit, hit.mat); did_scatter {
-			return attenuation * ray_color(scattered, world, depth - 1)
-		} else {
-			// this should only be possible to reachin weird floating point edge cases i think?
-			return Color{0, 0, 0}
-		}
+	hit, did_hit := ray_hit_any(ray, Interval{0.001, pos_infinity}, world).?
+	if !did_hit do return background_color
+
+	if scattered, attenuation, did_scatter := scatter(ray, hit); did_scatter {
+		return attenuation * ray_color(scattered, world, depth - 1, background_color)
 	}
 
-	// background 'sky'
-	dir := normalize(ray.direction)
-	a := (dir.y + 1.0) / 2.0
-	return lerp(Color{1, 1, 1}, Color{0.5, 0.7, 1}, a)
+	if light, is_light := hit.mat.(Diffuse_Light); is_light {
+		return light.emission
+	}
+
+	// this should only be reached in weird floating point edge cases,
+	// but it does happen a couple times per render
+	return Color{}
 }
 
 @(require_results)
-render :: proc(cam: Camera, world: []Hittable) -> [dynamic]byte {
+render :: proc(cam: Camera, world: []Hittable, background_color: Color) -> [dynamic]byte {
 	img := make([dynamic]byte)
 	reserve(&img, cam.image_width * cam.image_height * 3)
+	start_time := time.now()
 
 	for j in 0 ..< cam.image_height {
-		draw_progress_bar(int(j + 1), int(cam.image_height))
+		draw_progress_bar(int(j + 1), int(cam.image_height), start_time)
 		for i in 0 ..< cam.image_width {
 			pixel_color: Color
 
 			for _ in 0 ..< cam.samples_per_pixel {
-				// offset := [2]f32{rand.float32(), rand.float32()} / 2.0
-				// pixel_sample :=
-				// 	cam.first_pixel_loc +
-				// 	(f32(i) * cam.pixel_du + (cam.pixel_du * offset.x)) +
-				// 	(f32(j) * cam.pixel_dv + (cam.pixel_dv * offset.y))
-
-				// ray := Ray {
-				// 	origin    = cam.center,
-				// 	direction = pixel_sample - cam.center,
-				// }
-
 				ray := camera_get_ray(cam, i, j)
-				pixel_color += ray_color(ray, world, cam.max_bounces) / f32(cam.samples_per_pixel)
+				pixel_color +=
+					ray_color(ray, world, cam.max_bounces, background_color) /
+					f32(cam.samples_per_pixel)
 			}
 
 			bytes := color_to_bytes(pixel_color)
@@ -153,15 +145,30 @@ render :: proc(cam: Camera, world: []Hittable) -> [dynamic]byte {
 
 	return img
 
-	draw_progress_bar :: proc(current, target: int) {
-		fmt.printf("  rendered %d/%d ", current, target)
-		percent := f32(current) / f32(target)
+	draw_progress_bar :: proc(current, target: int, start_time: time.Time) {
+		percent := f64(current) / f64(target)
+		num_bars := int(percent * 50)
+		elapsed := time.since(start_time)
+		est_remaining := time.duration_seconds(elapsed) / percent
 
-		bars := strings.repeat("|", int(percent * 50), context.temp_allocator)
-		dots := strings.repeat(".", 50 - len(bars), context.temp_allocator)
-		fmt.print("[", bars, dots, "]\r", sep = "")
+		sb := strings.builder_make(context.temp_allocator)
+		defer mem.free_all(context.temp_allocator)
 
-		mem.free_all(context.temp_allocator)
+		fmt.sbprintf(&sb, "  rendered %d/%d [", current, target)
+		for _ in 0 ..< num_bars do fmt.sbprint(&sb, "|")
+		for _ in 0 ..< 50 - num_bars do fmt.sbprint(&sb, ".")
+		fmt.sbprint(&sb, "] ")
+
+		fmt.sbprintf(
+			&sb,
+			"(%d:%02d / %d:%02d est.)\r",
+			int(time.duration_minutes(elapsed)),
+			int(time.duration_seconds(elapsed)),
+			int(est_remaining) / 60,
+			int(est_remaining) % 60,
+		)
+
+		fmt.print(strings.to_string(sb))
 	}
 }
 

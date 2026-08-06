@@ -28,17 +28,39 @@ main :: proc() {
 	out_filepath := strings.clone_to_cstring(os.args[1] if len(os.args) == 2 else "out.png")
 	defer delete(out_filepath)
 
-	world := make([dynamic]Hittable)
+	cam := camera_init(
+		image_width = 400,
+		vertical_fov = 20,
+		center = Vec3{13, 2, 3},
+		target = Vec3{},
+	)
+
+	world, mats := many_spheres()
 	defer delete(world)
-
-	ground_mat := Material(Lambertian{Color{} + 0.5})
-	append(&world, Hittable{Object(Sphere{Vec3{0, -1000, 0}, 1000}), &ground_mat})
-
-	mats := make([dynamic]Material)
 	defer delete(mats)
 
-	for a := -11; a < 11; a += 1 {
-		for b := -11; b < 11; b += 1 {
+	img := render(cam, world[:], Color{0, 0.1, 0.4})
+	defer delete(img)
+
+	image.write_png(
+		filename = out_filepath,
+		w = c.int(cam.image_width),
+		h = c.int(cam.image_height),
+		comp = 3,
+		data = raw_data(img),
+		stride_in_bytes = c.int(cam.image_width * 3),
+	)
+}
+
+many_spheres :: proc() -> ([dynamic]Hittable, [dynamic]Material) {
+	mats := make([dynamic]Material, 50)
+	world := make([dynamic]Hittable, 50)
+
+	append(&mats, Material(Lambertian{Color{} + 0.5}))
+	append(&world, Hittable{Object(Sphere{Vec3{0, -1000, 0}, 1000}), &mats[len(mats) - 1]})
+
+	for a := -12; a < 12; a += 2 {
+		for b := -12; b < 12; b += 2 {
 			choose_mat := rand.float32()
 			center := Vec3{f32(a) + 0.9 * rand.float32(), 0.2, f32(b) + 0.9 * rand.float32()}
 
@@ -58,33 +80,17 @@ main :: proc() {
 		}
 	}
 
-	mat1 := Material(Dielectric{1.5})
-	append(&world, Hittable{Sphere{Vec3{0, 1, 0}, 1.0}, &mat1})
+	append(&mats, Material(Dielectric{1.5}))
+	append(&world, Hittable{Sphere{Vec3{0, 1, 0}, 1.0}, &mats[len(mats) - 1]})
 
-	mat2 := Material(Lambertian{Color{0.4, 0.2, 0.1}})
-	append(&world, Hittable{Sphere{Vec3{-4, 1, 0}, 1.0}, &mat2})
+	append(&mats, Material(Lambertian{Color{0.4, 0.2, 0.1}}))
+	append(&world, Hittable{Sphere{Vec3{-4, 1, 0}, 1.0}, &mats[len(mats) - 1]})
 
-	mat3 := Material(Metal{Color{0.7, 0.6, 0.5}, 0.0})
-	append(&world, Hittable{Sphere{Vec3{4, 1, 0}, 1.0}, &mat3})
+	append(&mats, Material(Metal{Color{0.7, 0.6, 0.5}, 0.0}))
+	append(&world, Hittable{Sphere{Vec3{4, 1, 0}, 1.0}, &mats[len(mats) - 1]})
 
-	cam := camera_init(
-		image_width = 1200,
-		vertical_fov = 20,
-		center = Vec3{13, 2, 3},
-		target = Vec3{},
-		defocus_angle = 0.6,
-		focus_dist = 10,
-	)
+	append(&mats, Material(Diffuse_Light{Color{1, 1, 1}}))
+	append(&world, Hittable{Sphere{Vec3{1000, 200, 200}, 1000}, &mats[len(mats) - 1]})
 
-	img := render(cam, world[:])
-	defer delete(img)
-
-	image.write_png(
-		filename = out_filepath,
-		w = c.int(cam.image_width),
-		h = c.int(cam.image_height),
-		comp = 3,
-		data = raw_data(img),
-		stride_in_bytes = c.int(cam.image_width * 3),
-	)
+	return world, mats
 }

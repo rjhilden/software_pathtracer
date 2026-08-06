@@ -16,22 +16,26 @@ Dielectric :: struct {
 	refractive_index: f32,
 }
 
+Diffuse_Light :: struct {
+	emission: Color,
+}
+
 Material :: union {
 	Lambertian,
 	Metal,
 	Dielectric,
+	Diffuse_Light,
 }
 
 scatter :: proc(
 	ray: Ray,
 	rec: Hit_Record,
-	mat: Material,
 ) -> (
 	scattered: Ray,
 	attenuation: Color,
-	hit: bool = false,
+	did_scatter: bool = false,
 ) {
-	switch m in mat {
+	#partial switch m in rec.mat {
 	case Lambertian:
 		return scatter_lambertian(ray, rec, m)
 	case Metal:
