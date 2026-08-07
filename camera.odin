@@ -4,7 +4,10 @@ import "core:fmt"
 import "core:math"
 import "core:math/rand"
 import "core:mem"
+import "core:os"
 import "core:strings"
+import "core:sync"
+import "core:thread"
 import "core:time"
 
 Camera :: struct {
@@ -77,8 +80,117 @@ camera_init :: proc(
 }
 
 @(require_results)
-degrees_to_radians :: proc(deg: f32) -> f32 {
-	return deg * math.PI / 180
+render :: proc(cam: Camera, world: []Hittable, background_color: Color) -> []byte {
+	img := make([]byte, cam.image_height * cam.image_width * 3)
+
+	cores := os.get_processor_core_count()
+	pool: thread.Pool
+	thread.pool_init(&pool, context.allocator, cores)
+	thread.pool_start(&pool)
+	defer thread.pool_destroy(&pool)
+
+	start_time := time.now()
+	cam := cam
+	progress := 0
+	for row in 0 ..< cam.image_height {
+		data := new(Render_Row_Data)
+		data^ = {&cam, world, background_color, row, img, &progress}
+		thread.pool_add_task(&pool, context.allocator, render_row, data)
+	}
+
+	fmt.printfln("  rendering on %d threads", cores)
+	for progress < cam.image_height {
+		draw_progress_bar(progress + 1, cam.image_height, start_time)
+		time.sleep(time.Duration(50) * time.Millisecond)
+	}
+	thread.pool_finish(&pool)
+	draw_progress_bar(progress, cam.image_height, start_time)
+	fmt.printf("\n  done\n")
+
+	return img
+
+	Render_Row_Data :: struct {
+		cam:              ^Camera,
+		world:            []Hittable,
+		background_color: Color,
+		row:              int,
+		img:              []byte,
+		progress:         ^int,
+	}
+
+	render_row :: proc(t: thread.Task) {
+		data := (cast(^Render_Row_Data)t.data)^
+		defer free(t.data)
+		defer sync.atomic_add(data.progress, 1)
+
+		for i in 0 ..< data.cam.image_width {
+			pixel_color: Color
+
+			for _ in 0 ..< data.cam.samples_per_pixel {
+				ray := camera_get_ray(data.cam^, i, data.row)
+				pixel_color +=
+					ray_color(ray, data.world, data.cam.max_bounces, data.background_color) /
+					f32(data.cam.samples_per_pixel)
+			}
+
+			bytes := color_to_bytes(pixel_color)
+			data.img[3 * (data.cam.image_width * data.row + i) + 0] = bytes.r
+			data.img[3 * (data.cam.image_width * data.row + i) + 1] = bytes.g
+			data.img[3 * (data.cam.image_width * data.row + i) + 2] = bytes.b
+		}
+	}
+}
+
+@(require_results)
+render_singlethreaded :: proc(cam: Camera, world: []Hittable, background_color: Color) -> []byte {
+	img := make([]byte, cam.image_height * cam.image_width * 3)
+	start_time := time.now()
+
+	img_i := 0
+	for j in 0 ..< cam.image_height {
+		draw_progress_bar(j + 1, cam.image_height, start_time)
+		for i in 0 ..< cam.image_width {
+			pixel_color: Color
+
+			for _ in 0 ..< cam.samples_per_pixel {
+				ray := camera_get_ray(cam, i, j)
+				pixel_color +=
+					ray_color(ray, world, cam.max_bounces, background_color) /
+					f32(cam.samples_per_pixel)
+			}
+
+			bytes := color_to_bytes(pixel_color)
+			img[3 * (cam.image_width * j + i) + 0] = bytes.r
+			img[3 * (cam.image_width * j + i) + 1] = bytes.g
+			img[3 * (cam.image_width * j + i) + 2] = bytes.b
+		}
+	}
+	fmt.printf("\n  done\n")
+
+	return img
+}
+
+// should be a subfunction of render, but i have 2 render implementations so i'm just making it private
+@(require_results, private = "file")
+ray_color :: proc(ray: Ray, world: []Hittable, depth: int, background_color: Color) -> Color {
+	if depth <= 0 do return Color{}
+
+	// start interval at 0.001 to solve shadow acne
+	hit, did_hit := ray_hit_any(ray, Interval{0.001, pos_infinity}, world).?
+	if !did_hit do return background_color
+
+	if scattered, attenuation, did_scatter := scatter(ray, hit); did_scatter {
+		return attenuation * ray_color(scattered, world, depth - 1, background_color)
+	}
+
+	if light, is_light := hit.mat.(Diffuse_Light); is_light {
+		return light.emission
+	}
+
+	// this should almost never be reached,
+	// but it can happen a couple times per render
+	fmt.println("i am in this weird spot")
+	return Color{}
 }
 
 @(require_results)
@@ -99,77 +211,32 @@ camera_get_ray :: proc(cam: Camera, i, j: int) -> Ray {
 	return Ray{ray_origin, pixel_sample - ray_origin}
 }
 
-@(require_results)
-ray_color :: proc(ray: Ray, world: []Hittable, depth: int, background_color: Color) -> Color {
-	if depth <= 0 do return Color{}
+// should be a subfunction of render, but i have 2 render implementations so i'm just making it private
+@(private = "file")
+draw_progress_bar :: proc(current, target: int, start_time: time.Time) {
+	percent := f64(current) / f64(target)
+	num_bars := int(percent * 50)
+	elapsed := time.since(start_time)
+	est_remaining := time.duration_seconds(elapsed) / percent
 
-	hit, did_hit := ray_hit_any(ray, Interval{0.001, pos_infinity}, world).?
-	if !did_hit do return background_color
+	sb := strings.builder_make(context.temp_allocator)
+	defer mem.free_all(context.temp_allocator)
 
-	if scattered, attenuation, did_scatter := scatter(ray, hit); did_scatter {
-		return attenuation * ray_color(scattered, world, depth - 1, background_color)
-	}
+	fmt.sbprintf(&sb, "  rendered %d/%d [", current, target)
+	for _ in 0 ..< num_bars do fmt.sbprint(&sb, "|")
+	for _ in 0 ..< 50 - num_bars do fmt.sbprint(&sb, ".")
+	fmt.sbprint(&sb, "] ")
 
-	if light, is_light := hit.mat.(Diffuse_Light); is_light {
-		return light.emission
-	}
+	fmt.sbprintf(
+		&sb,
+		"(%d:%02d / %d:%02d est.)\r",
+		int(time.duration_minutes(elapsed)),
+		int(time.duration_seconds(elapsed)) % 60,
+		int(est_remaining) / 60,
+		int(est_remaining) % 60,
+	)
 
-	// this should only be reached in weird floating point edge cases,
-	// but it does happen a couple times per render
-	return Color{}
-}
-
-@(require_results)
-render :: proc(cam: Camera, world: []Hittable, background_color: Color) -> [dynamic]byte {
-	img := make([dynamic]byte)
-	reserve(&img, cam.image_width * cam.image_height * 3)
-	start_time := time.now()
-
-	for j in 0 ..< cam.image_height {
-		draw_progress_bar(int(j + 1), int(cam.image_height), start_time)
-		for i in 0 ..< cam.image_width {
-			pixel_color: Color
-
-			for _ in 0 ..< cam.samples_per_pixel {
-				ray := camera_get_ray(cam, i, j)
-				pixel_color +=
-					ray_color(ray, world, cam.max_bounces, background_color) /
-					f32(cam.samples_per_pixel)
-			}
-
-			bytes := color_to_bytes(pixel_color)
-			append_elems(&img, bytes.r, bytes.g, bytes.b)
-		}
-	}
-	fmt.printf("\n  done\n")
-
-	return img
-
-	draw_progress_bar :: proc(current, target: int, start_time: time.Time) {
-		percent := f64(current) / f64(target)
-		num_bars := int(percent * 50)
-		elapsed := time.since(start_time)
-		est_remaining := time.duration_seconds(elapsed) / percent
-
-		sb := strings.builder_make(context.temp_allocator)
-		defer mem.free_all(context.temp_allocator)
-
-		fmt.sbprintf(&sb, "  rendered %d/%d [", current, target)
-		for _ in 0 ..< num_bars do fmt.sbprint(&sb, "|")
-		for _ in 0 ..< 50 - num_bars do fmt.sbprint(&sb, ".")
-		fmt.sbprint(&sb, "] ")
-
-		fmt.sbprintf(
-			&sb,
-			"(%d:%02d / %d:%02d est.)\r",
-			int(time.duration_minutes(elapsed)),
-			int(time.duration_seconds(elapsed)) % 60,
-			int(est_remaining) / 60,
-			int(est_remaining) % 60,
-		)
-
-		fmt.print(strings.to_string(sb))
-	}
+	fmt.print(strings.to_string(sb))
 }
 
 @(private = "file")
