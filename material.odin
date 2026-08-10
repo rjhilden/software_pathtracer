@@ -55,6 +55,8 @@ scatter_lambertian :: proc(
 	attenuation: Color,
 	hit: bool = false,
 ) {
+	// we do NOT normalize here because, depending on the object, there can be more optimal ways to
+	// normalize than doing three square roots
 	scatter_direction := rec.normal + vec3_random_unit()
 	if vec3_near_zero(scatter_direction) do scatter_direction = rec.normal
 
@@ -73,8 +75,7 @@ scatter_metal :: proc(
 	attenuation: Color,
 	hit: bool = false,
 ) {
-	reflected :=
-		normalize(vec3_reflect(ray.direction, rec.normal)) + (mat.fuzz * vec3_random_unit())
+	reflected := normalize(reflect(ray.direction, rec.normal)) + (mat.fuzz * vec3_random_unit())
 
 	scattered = Ray{rec.point, reflected}
 	attenuation = mat.albedo
@@ -100,10 +101,10 @@ scatter_dielectric :: proc(
 	direction := Vec3{}
 	if refract_ratio * sin_theta > 1.0 || reflectance(cos_theta, refract_ratio) > rand.float32() {
 		// must reflect: total internal reflection
-		direction = vec3_reflect(unit_direction, rec.normal)
+		direction = reflect(unit_direction, rec.normal)
 	} else {
 		// can refract
-		direction = vec3_refract(unit_direction, rec.normal, refract_ratio)
+		direction = refract(unit_direction, rec.normal, refract_ratio)
 	}
 
 	scattered = Ray{rec.point, direction}

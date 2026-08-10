@@ -11,23 +11,11 @@ cross :: linalg.cross
 length :: linalg.length
 normalize :: linalg.normalize
 
-@(require_results)
-vec3_reflect :: proc(vec, normal: Vec3) -> Vec3 {
-	return vec - 2 * dot(vec, normal) * normal
-}
+reflect :: linalg.reflect
+refract :: linalg.refract
+length2 :: linalg.length2
 
-@(require_results)
-vec3_refract :: proc(vec, normal: Vec3, refract_ratio: f32) -> Vec3 {
-	cos_theta := math.min(1.0, dot(-vec, normal))
-	refracted_perp := refract_ratio * (vec + cos_theta * normal)
-	refracted_parallel := -math.sqrt(math.abs(1.0 - vec3_length_squared(refracted_perp))) * normal
-	return refracted_perp + refracted_parallel
-}
-
-@(require_results)
-vec3_length_squared :: proc(vec: Vec3) -> f32 {
-	return dot(vec, vec)
-}
+lerp :: linalg.lerp
 
 @(require_results)
 vec3_near_zero :: proc(vec: Vec3) -> bool {
@@ -53,7 +41,7 @@ vec3_random_range :: proc(min, max: f32) -> Vec3 {
 vec3_random_unit :: proc() -> Vec3 {
 	for true {
 		vec := vec3_random_range(-1, 1)
-		len_sq := vec3_length_squared(vec)
+		len_sq := length2(vec)
 		if 1e-30 < len_sq && len_sq <= 1 do return normalize(vec)
 	}
 	unreachable()
@@ -63,7 +51,7 @@ vec3_random_unit :: proc() -> Vec3 {
 vec3_random_in_unit_disk :: proc() -> Vec3 {
 	for true {
 		vec := Vec3{rand.float32_range(-1, 1), rand.float32_range(-1, 1), 0}
-		if vec3_length_squared(vec) < 1 do return vec
+		if length2(vec) < 1 do return vec
 	}
 	unreachable()
 }
@@ -99,11 +87,6 @@ transformation_matrix :: proc(
 }
 
 Color :: distinct Vec3
-
-@(require_results)
-lerp :: proc(x, y: $T/[$N]$E, a: E) -> T {
-	return (1.0 - a) * x + a * y
-}
 
 @(require_results)
 color_linear_to_gamma :: proc(color: Color) -> Color {
@@ -148,4 +131,9 @@ interval_contains :: proc(interval: Interval, x: f32) -> bool {
 @(require_results)
 interval_surrounds :: proc(interval: Interval, x: f32) -> bool {
 	return interval.min < x && x < interval.max
+}
+
+@(require_results)
+degrees_to_radians :: proc(deg: f32) -> f32 {
+	return deg * math.PI / 180
 }

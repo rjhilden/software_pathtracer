@@ -187,10 +187,9 @@ ray_color :: proc(ray: Ray, world: []Hittable, depth: int, background_color: Col
 		return light.emission
 	}
 
-	// this should almost never be reached,
-	// but it can happen a couple times per render
-	fmt.println("i am in this weird spot")
-	return Color{}
+	// this should not ever be reached,
+	// but it can happen in renders with weird scenes
+	return Color{1, 0, 1}
 }
 
 @(require_results)

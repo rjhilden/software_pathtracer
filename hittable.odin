@@ -9,14 +9,14 @@ import "core:strconv"
 import "core:strings"
 import "core:testing"
 
-Object :: union {
-	Sphere,
-	Mesh,
-}
-
 Hittable :: struct {
 	obj: Object,
 	mat: ^Material,
+}
+
+Object :: union {
+	Sphere,
+	Mesh,
 }
 
 Hit_Record :: struct {
@@ -140,6 +140,8 @@ ray_mesh_hit :: proc(
 
 	return maybe_hit
 
+	// Möller–Trumbore intersection algorithm
+	// https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
 	ray_triangle_hit :: #force_inline proc(
 		ray: Ray,
 		interval: Interval,
@@ -147,10 +149,6 @@ ray_mesh_hit :: proc(
 		mat: ^Material,
 		face: Face,
 	) -> Maybe(Hit_Record) {
-		// Möller–Trumbore intersection algorithm
-		// https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
-
-		// TODO: need to figure out the transformation stuff
 		inverse_transformation := linalg.inverse(mesh.transformation)
 		local_ray := Ray {
 			vec3_transform(ray.origin, 1, inverse_transformation),
@@ -164,21 +162,27 @@ ray_mesh_hit :: proc(
 		e1 := v2 - v1
 		e2 := v3 - v1
 
+		// backface culling, assumes CCW-wound triangles
+		// if dot(cross(e1, e2), local_ray.direction) > 0 do return nil
+
 		ray_cross_e2 := cross(local_ray.direction, e2)
 		det := dot(e1, ray_cross_e2)
 
-		if abs(det) < math.F32_EPSILON do return nil // ray is parallel to triangle
+		// ray is parallel to triangle
+		if abs(det) < math.F32_EPSILON do return nil
 
 		inv_det := 1.0 / det
 		s := local_ray.origin - v1
 		u := inv_det * dot(s, ray_cross_e2)
 
-		if u < -math.F32_EPSILON || u - 1 > math.F32_EPSILON do return nil // ray passes outside e2's bounds
+		// ray passes outside e2's bounds
+		if u < -math.F32_EPSILON || u - 1 > math.F32_EPSILON do return nil
 
 		s_cross_e1 := cross(s, e1)
 		v := inv_det * dot(local_ray.direction, s_cross_e1)
 
-		if v < -math.F32_EPSILON || u + v - 1 > math.F32_EPSILON do return nil // ray passes outside e1's bounds
+		// ray passes outside e1's bounds
+		if v < -math.F32_EPSILON || u + v - 1 > math.F32_EPSILON do return nil
 
 		// the ray intersects with the triangle, compute t to find where on the ray
 		t := inv_det * dot(e2, s_cross_e1)
@@ -199,7 +203,7 @@ ray_mesh_hit :: proc(
 			),
 		)
 
-		rec.front_face = dot(local_ray.direction, normal) < 0
+		rec.front_face = dot(ray.direction, normal) < 0
 		rec.normal = normal if rec.front_face else -normal
 
 		return rec
@@ -222,7 +226,7 @@ mesh_load :: proc(data: string) -> (mesh: Mesh, ok: bool = false) {
 	faces := make([dynamic]Face, context.temp_allocator)
 	defer mem.free_all(context.temp_allocator)
 
-	str := string(data)
+	str := data
 	for line in strings.split_lines_iterator(&str) {
 		line := strings.trim_space(line)
 		if len(line) == 0 || line[0] == '#' do continue
@@ -230,13 +234,13 @@ mesh_load :: proc(data: string) -> (mesh: Mesh, ok: bool = false) {
 		type := strings.fields_iterator(&line) or_return
 		switch type {
 		case "v":
-			v := parse_vertex(line) or_return
+			v := #force_inline parse_vertex(line) or_return
 			append(&verts, v)
 		case "vn":
-			vn := parse_normal(line) or_return
+			vn := #force_inline parse_normal(line) or_return
 			append(&norms, vn)
 		case "f":
-			f := parse_face(line) or_return
+			f := #force_inline parse_face(line) or_return
 			append(&faces, f)
 		case:
 			continue
@@ -247,43 +251,47 @@ mesh_load :: proc(data: string) -> (mesh: Mesh, ok: bool = false) {
 	mesh.verts = slice.clone(verts[:])
 	mesh.norms = slice.clone(norms[:])
 	mesh.faces = slice.clone(faces[:])
+	mesh.transformation = transformation_matrix()
 
 	return
 
-	parse_vertex :: #force_inline proc(line: string) -> (vec: Vec3, ok: bool = false) {
+	parse_vertex :: proc(line: string) -> (vec: Vec3, ok: bool = false) {
 		// x y z [w or 1.0]
 		line := line
 		x := strconv.parse_f32(strings.fields_iterator(&line) or_return) or_return
 		y := strconv.parse_f32(strings.fields_iterator(&line) or_return) or_return
 		z := strconv.parse_f32(strings.fields_iterator(&line) or_return) or_return
-		w := strconv.parse_f32(strings.fields_iterator(&line) or_else "1.0") or_return
-		if len(line) > 0 do return
+		w: f32 = 1
+
+		w_str := strings.fields_iterator(&line) or_else "1.0"
+		if w_str[0] != '#' do w = strconv.parse_f32(w_str) or_return
+		// if have_non_comment(&line) do return
 
 		ok = true
 		vec = Vec3{x, y, z} / w
 		return
 	}
 
-	parse_normal :: #force_inline proc(line: string) -> (vec: Vec3, ok: bool = false) {
+	parse_normal :: proc(line: string) -> (vec: Vec3, ok: bool = false) {
 		// x y z
 		line := line
 		x := strconv.parse_f32(strings.fields_iterator(&line) or_return) or_return
 		y := strconv.parse_f32(strings.fields_iterator(&line) or_return) or_return
 		z := strconv.parse_f32(strings.fields_iterator(&line) or_return) or_return
-		if len(line) > 0 do return
+		if have_non_comment(&line) do return
 
 		ok = true
 		vec = Vec3{x, y, z}
 		return
 	}
 
-	parse_face :: #force_inline proc(line: string) -> (face: Face, ok: bool = false) {
+	parse_face :: proc(line: string) -> (face: Face, ok: bool = false) {
 		// 3 elems each made of 3 indices: vertex / texture / normal
 		line := line
 		e1 := strings.fields_iterator(&line) or_return
 		e2 := strings.fields_iterator(&line) or_return
 		e3 := strings.fields_iterator(&line) or_return
-		if len(line) > 0 do return // we only support triangles right now
+		if have_non_comment(&line) do return
 
 		verts: [3]u32
 		norms: [3]u32
@@ -293,7 +301,7 @@ mesh_load :: proc(data: string) -> (mesh: Mesh, ok: bool = false) {
 			vert := strings.split_iterator(&e, "/") or_return // we always need a vert
 			text, has_text := strings.split_iterator(&e, "/") // returns ok = false when empty string
 			norm, has_norm := strings.split_iterator(&e, "/")
-			if len(e) > 0 do return
+			if have_non_comment(&e) do return
 
 			// indices are 1-based so subtract 1
 			verts[i] = u32(strconv.parse_uint(vert, 10) or_return) - 1
@@ -305,6 +313,11 @@ mesh_load :: proc(data: string) -> (mesh: Mesh, ok: bool = false) {
 		face = Face{verts, norms}
 		return
 	}
+
+	have_non_comment :: proc(s: ^string) -> bool {
+		if last, have_more := strings.fields_iterator(s); have_more do return last[0] != '#'
+		return false
+	}
 }
 
 mesh_delete :: proc(mesh: Mesh) {
@@ -313,21 +326,25 @@ mesh_delete :: proc(mesh: Mesh) {
 	delete(mesh.faces)
 }
 
+world_delete :: proc(world: []Hittable) {
+	for item in world do if m, ok := item.obj.(Mesh); ok do mesh_delete(m)
+}
+
 @(test)
 test_mesh_parsing :: proc(t: ^testing.T) {
 	mesh_data := `
 		# this is a comment
 		v 1.2 2.3 3.4
-		v 2 4 6 2
-		v 3 3 3
+		v 2 4 6 2 # inline comment
+		v 3 3 3 # one here too
 
 		# now some norms
 		vn -1 0 1
 		vn 0 1 0
-		vn 3 3 2
+		vn 3 3 2 # another inline comment for fun
 
 		# faces
-		f 1 2 3
+		f 1 2 3 # one more here
 		f 3/2/12 2/3/42 1/17/38
 	`
 
@@ -337,8 +354,8 @@ test_mesh_parsing :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, Vec3{1.2, 2.3, 3.4}, m.verts[0])
 	testing.expect_value(t, Vec3{-1, 0, 1}, m.norms[0])
-	testing.expect_value(t, [3]u32{1, 2, 3}, m.faces[0].verts)
+	testing.expect_value(t, [3]u32{0, 1, 2}, m.faces[0].verts)
 	testing.expect_value(t, [3]u32{0, 0, 0}, m.faces[0].norms)
-	testing.expect_value(t, [3]u32{3, 2, 1}, m.faces[1].verts)
-	testing.expect_value(t, [3]u32{12, 42, 38}, m.faces[1].norms)
+	testing.expect_value(t, [3]u32{2, 1, 0}, m.faces[1].verts)
+	testing.expect_value(t, [3]u32{11, 41, 37}, m.faces[1].norms)
 }
