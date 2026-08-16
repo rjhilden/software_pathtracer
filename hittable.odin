@@ -1,5 +1,6 @@
 package main
 
+import "core:fmt"
 import "core:math"
 import "core:math/linalg"
 import "core:mem"
@@ -12,6 +13,7 @@ import "core:testing"
 Hittable :: struct {
 	obj: Object,
 	mat: ^Material,
+	box: Bounding_Box,
 }
 
 Object :: union {
@@ -52,7 +54,7 @@ ray_hit :: proc(ray: Ray, interval: Interval, hittable: Hittable) -> Maybe(Hit_R
 	case Sphere:
 		return ray_sphere_hit(ray, interval, obj, hittable.mat)
 	case Mesh:
-		return ray_mesh_hit(ray, interval, obj, hittable.mat)
+		return ray_mesh_hit(ray, interval, obj, hittable.mat, hittable.box)
 	case:
 		return nil
 	}
@@ -116,25 +118,37 @@ face_flat_normal :: proc(face: Face, vert_array: []Vec3) -> Vec3 {
 }
 
 @(require_results)
+face_vertices :: proc(face: Face, vert_array: []Vec3) -> (Vec3, Vec3, Vec3) {
+	return vert_array[face.verts[0]], vert_array[face.verts[1]], vert_array[face.verts[2]]
+}
+
+@(require_results)
 ray_mesh_hit :: proc(
 	ray: Ray,
 	interval: Interval,
 	mesh: Mesh,
 	mat: ^Material,
+	box: Bounding_Box,
 ) -> Maybe(Hit_Record) {
+	inverse_transformation := linalg.inverse(mesh.transformation)
+	local_ray := Ray {
+		vec3_transform(ray.origin, 1, inverse_transformation),
+		vec3_transform(ray.direction, 0, inverse_transformation),
+	}
+	if !ray_bounding_box_hit(local_ray, box) do return nil
+
 	maybe_hit: Maybe(Hit_Record)
 
 	closest_so_far := interval.max
 	for face in mesh.faces {
 		hit := ray_triangle_hit(
-			ray,
+			local_ray,
 			Interval{interval.min, closest_so_far},
 			mesh,
 			mat,
 			face,
 		).? or_continue
 
-		closest_so_far = hit.t
 		maybe_hit = hit
 	}
 
@@ -142,6 +156,7 @@ ray_mesh_hit :: proc(
 
 	// Möller–Trumbore intersection algorithm
 	// https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
+	// NOTE: ray param needs to be in the mesh's local space
 	ray_triangle_hit :: #force_inline proc(
 		ray: Ray,
 		interval: Interval,
@@ -149,15 +164,7 @@ ray_mesh_hit :: proc(
 		mat: ^Material,
 		face: Face,
 	) -> Maybe(Hit_Record) {
-		inverse_transformation := linalg.inverse(mesh.transformation)
-		local_ray := Ray {
-			vec3_transform(ray.origin, 1, inverse_transformation),
-			vec3_transform(ray.direction, 0, inverse_transformation),
-		}
-
-		v1 := mesh.verts[face.verts[0]]
-		v2 := mesh.verts[face.verts[1]]
-		v3 := mesh.verts[face.verts[2]]
+		v1, v2, v3 := face_vertices(face, mesh.verts)
 
 		e1 := v2 - v1
 		e2 := v3 - v1
@@ -165,21 +172,21 @@ ray_mesh_hit :: proc(
 		// backface culling, assumes CCW-wound triangles
 		// if dot(cross(e1, e2), local_ray.direction) > 0 do return nil
 
-		ray_cross_e2 := cross(local_ray.direction, e2)
+		ray_cross_e2 := cross(ray.direction, e2)
 		det := dot(e1, ray_cross_e2)
 
 		// ray is parallel to triangle
 		if abs(det) < math.F32_EPSILON do return nil
 
 		inv_det := 1.0 / det
-		s := local_ray.origin - v1
+		s := ray.origin - v1
 		u := inv_det * dot(s, ray_cross_e2)
 
 		// ray passes outside e2's bounds
 		if u < -math.F32_EPSILON || u - 1 > math.F32_EPSILON do return nil
 
 		s_cross_e1 := cross(s, e1)
-		v := inv_det * dot(local_ray.direction, s_cross_e1)
+		v := inv_det * dot(ray.direction, s_cross_e1)
 
 		// ray passes outside e1's bounds
 		if v < -math.F32_EPSILON || u + v - 1 > math.F32_EPSILON do return nil
@@ -190,8 +197,13 @@ ray_mesh_hit :: proc(
 
 		if !interval_surrounds(interval, t) do return nil // hit is outside interval
 
+		world_ray := Ray {
+			vec3_transform(ray.origin, 1, mesh.transformation),
+			vec3_transform(ray.direction, 0, mesh.transformation),
+		}
+
 		rec: Hit_Record
-		rec.point = ray_at(ray, t)
+		rec.point = ray_at(world_ray, t)
 		rec.t = t
 		rec.mat = mat
 
@@ -199,11 +211,11 @@ ray_mesh_hit :: proc(
 			vec3_transform(
 				face_flat_normal(face, mesh.verts),
 				0,
-				linalg.transpose(inverse_transformation),
+				linalg.transpose(linalg.inverse(mesh.transformation)),
 			),
 		)
 
-		rec.front_face = dot(ray.direction, normal) < 0
+		rec.front_face = dot(world_ray.direction, normal) < 0
 		rec.normal = normal if rec.front_face else -normal
 
 		return rec
@@ -328,6 +340,36 @@ mesh_delete :: proc(mesh: Mesh) {
 
 world_delete :: proc(world: []Hittable) {
 	for item in world do if m, ok := item.obj.(Mesh); ok do mesh_delete(m)
+}
+
+Bounding_Box :: struct {
+	min, max: Vec3,
+}
+
+mesh_make_bounding_box :: proc(mesh: Mesh) -> Bounding_Box {
+	PADDING :: 1e-5
+
+	min := Vec3(math.inf_f32(+1))
+	max := Vec3(math.inf_f32(-1))
+
+	for v in mesh.verts {
+		min = vec3_pairwise_min(min, v)
+		max = vec3_pairwise_max(max, v)
+	}
+
+	return Bounding_Box{min - PADDING, max + PADDING}
+}
+
+ray_bounding_box_hit :: proc(ray: Ray, box: Bounding_Box) -> bool {
+	inv_dir := 1.0 / ray.direction
+
+	t1 := (box.min - ray.origin) * inv_dir
+	t2 := (box.max - ray.origin) * inv_dir
+
+	t_min := linalg.max(vec3_pairwise_min(t1, t2))
+	t_max := linalg.min(vec3_pairwise_max(t1, t2))
+
+	return t_min <= t_max && t_max >= 0.0
 }
 
 @(test)

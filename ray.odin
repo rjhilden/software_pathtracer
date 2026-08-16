@@ -18,6 +18,16 @@ length2 :: linalg.length2
 lerp :: linalg.lerp
 
 @(require_results)
+vec3_pairwise_min :: proc(a, b: Vec3) -> Vec3 {
+	return Vec3{min(a.x, b.x), min(a.y, b.y), min(a.z, b.z)}
+}
+
+@(require_results)
+vec3_pairwise_max :: proc(a, b: Vec3) -> Vec3 {
+	return Vec3{max(a.x, b.x), max(a.y, b.y), max(a.z, b.z)}
+}
+
+@(require_results)
 vec3_near_zero :: proc(vec: Vec3) -> bool {
 	s :: 1e-8
 	return math.abs(vec.x) < s && math.abs(vec.y) < s && math.abs(vec.z) < s
@@ -39,7 +49,7 @@ vec3_random_range :: proc(min, max: f32) -> Vec3 {
 
 @(require_results)
 vec3_random_unit :: proc() -> Vec3 {
-	for true {
+	for {
 		vec := vec3_random_range(-1, 1)
 		len_sq := length2(vec)
 		if 1e-30 < len_sq && len_sq <= 1 do return normalize(vec)
@@ -49,7 +59,7 @@ vec3_random_unit :: proc() -> Vec3 {
 
 @(require_results)
 vec3_random_in_unit_disk :: proc() -> Vec3 {
-	for true {
+	for {
 		vec := Vec3{rand.float32_range(-1, 1), rand.float32_range(-1, 1), 0}
 		if length2(vec) < 1 do return vec
 	}

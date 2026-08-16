@@ -45,7 +45,7 @@ main :: proc() {
 		aspect_ratio = 1,
 	)
 
-	cam := cheap_cam
+	cam := expensive_cam
 
 	world, mats := cornell_box()
 	defer {
@@ -117,35 +117,48 @@ cornell_box :: proc() -> ([dynamic]Hittable, [dynamic]Material) {
 	red_lamb := Lambertian{Color{1, 0, 0}}
 	green_lamb := Lambertian{Color{0, 1, 0}}
 	light_mat := Diffuse_Light{Color{} + 1}
-	// white_lamb := Metal{Color{} + 0.9, 1}
-	// red_lamb := Metal{Color{1, 0, 0}, 1}
-	// green_lamb := Metal{Color{0, 1, 0}, 1}
-	// light_mat := Diffuse_Light{Color{} + 1}
 
 	append(&mats, Material(white_lamb))
-	append(&world, Hittable{Object(floor), &mats[len(mats) - 1]})
-	append(&world, Hittable{Object(back_wall), &mats[len(mats) - 1]})
-	append(&world, Hittable{Object(ceiling), &mats[len(mats) - 1]})
+	append(&world, Hittable{Object(floor), &mats[len(mats) - 1], mesh_make_bounding_box(floor)})
+	append(
+		&world,
+		Hittable{Object(back_wall), &mats[len(mats) - 1], mesh_make_bounding_box(back_wall)},
+	)
+	append(
+		&world,
+		Hittable{Object(ceiling), &mats[len(mats) - 1], mesh_make_bounding_box(ceiling)},
+	)
 	// append(&world, Hittable{Object(front_wall), &mats[len(mats) - 1]})
 
 	append(&mats, Material(red_lamb))
-	append(&world, Hittable{Object(left_wall), &mats[len(mats) - 1]})
+	append(
+		&world,
+		Hittable{Object(left_wall), &mats[len(mats) - 1], mesh_make_bounding_box(left_wall)},
+	)
 
 	append(&mats, Material(green_lamb))
-	append(&world, Hittable{Object(right_wall), &mats[len(mats) - 1]})
+	append(
+		&world,
+		Hittable{Object(right_wall), &mats[len(mats) - 1], mesh_make_bounding_box(right_wall)},
+	)
 
 	append(&mats, Material(light_mat))
-	append(&world, Hittable{Object(light), &mats[len(mats) - 1]})
+	append(&world, Hittable{Object(light), &mats[len(mats) - 1], mesh_make_bounding_box(light)})
 	// append(&world, Hittable{Object(Sphere{Vec3{0.5, 0.95, -0.5}, 0.1}), &mats[len(mats) - 1]}) // sphere light
 
 	// glass sphere
-	append(&mats, Material(Dielectric{1.5}))
-	append(&world, Hittable{Object(Sphere{Vec3{0.5, 0.5, -0.5}, 0.2}), &mats[len(mats) - 1]})
+	// append(&mats, Material(Dielectric{1.5}))
+	// append(&world, Hittable{Object(Sphere{Vec3{0.5, 0.5, -0.5}, 0.2}), &mats[len(mats) - 1], {}})
 
 	// lambertian teapot (needs bounding box optimization to be feasible)
-	// append(&mats, Material(white_lamb))
-	// teapot, _ := mesh_load_from_file("objs/utah_teapot_lowestpoly.obj")
-	// append(&world, Hittable{Object(teapot), &mats[len(mats) - 1]})
+	teapot, _ := mesh_load_from_file("objs/utah_teapot_mediumpoly.obj")
+	teapot.transformation = transformation_matrix(
+		translation = Vec3{0.5, 0.4, -0.5},
+		rotation_degrees = Vec3{30, 45, 30},
+		scale = Vec3{} + 0.1,
+	)
+	append(&mats, Material(white_lamb))
+	append(&world, Hittable{Object(teapot), &mats[len(mats) - 1], mesh_make_bounding_box(teapot)})
 
 	return world, mats
 }
@@ -159,25 +172,26 @@ teapot_test :: proc() -> ([dynamic]Hittable, [dynamic]Material) {
 
 	mesh.transformation = transformation_matrix(
 		translation = Vec3{-0.1, 0.01, -2},
-		rotation_degrees = Vec3{0, -15, 0},
+		rotation_degrees = Vec3{0, -45, 0},
 		scale = Vec3{} + 0.5,
 	)
 
 	// teapot
 	append(&mats, Material(Lambertian{Color{} + 1}))
-	append(&world, Hittable{Object(mesh), &mats[len(mats) - 1]})
+	append(&world, Hittable{Object(mesh), &mats[len(mats) - 1], mesh_make_bounding_box(mesh)})
 
 	// ground
 	append(&mats, Material(Lambertian{Color{0, 0.7, 0.2}}))
-	append(&world, Hittable{Object(Sphere{Vec3{0, -1000, 0}, 1000}), &mats[len(mats) - 1]})
+	append(&world, Hittable{Object(Sphere{Vec3{0, -1000, 0}, 1000}), &mats[len(mats) - 1], {}})
 
 	// sun
 	append(&mats, Material(Diffuse_Light{Color{1, 1, 1}}))
-	append(&world, Hittable{Sphere{Vec3{100, 1000, -200}, 800}, &mats[len(mats) - 1]})
+	append(&world, Hittable{Sphere{Vec3{100, 1200, -100}, 800}, &mats[len(mats) - 1], {}})
 
 	return world, mats
 }
 
+/*
 mesh_test :: proc() -> ([dynamic]Hittable, [dynamic]Material) {
 	mats := make([dynamic]Material, 3)
 	world := make([dynamic]Hittable, 3)
@@ -264,3 +278,4 @@ many_spheres :: proc() -> ([dynamic]Hittable, [dynamic]Material) {
 
 	return world, mats
 }
+*/
